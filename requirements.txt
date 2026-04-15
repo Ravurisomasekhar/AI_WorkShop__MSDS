@@ -1,0 +1,8 @@
+streamlit==1.32.0
+pandas==2.2.1
+openai==1.14.0
+langchain==0.1.13
+chromadb==0.4.24
+crewai==0.22.5
+langgraph==0.0.30
+yolov8==0.0.1
