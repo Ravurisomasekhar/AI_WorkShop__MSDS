@@ -56,12 +56,26 @@ def validate_tower(row):
         return "Pass", "Compliant with IS Standards"
     # ---------------------------
     
-    # --- WRITE YOUR IF/THEN STATEMENTS HERE ---
-    status = "Pending"
-    reason = "Code not implemented yet"
-    # ------------------------------------------
+    errors = []
+
+    # Rule: If Wind Zone == 4 AND Height > 40
+    if wind_zone == 4 and height > 40:
+        
+        # Rule 1: Steel grade must be High-Tensile
+        if steel_grade != "High-Tensile":
+            errors.append("Steel Grade must be High-Tensile")
+
+        # Rule 2: Flange thickness must be >= 25
+        if thickness < 25:
+            errors.append(f"Flange too thin ({thickness}mm). Must be >= 25mm")
+
+    # Final decision
+    if len(errors) > 0:
+        return "Fail", " | ".join(errors)
+
+    return "Pass", "Compliant with IS Standards"
+
     
-    return status, reason
 
 # ==========================================
 
