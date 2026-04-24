@@ -6,3 +6,6 @@ chromadb==0.4.24
 crewai==0.22.5
 langgraph==0.0.30
 yolov8==0.0.1
+
+requests==2.31.0
+Pillow==10.2.0
