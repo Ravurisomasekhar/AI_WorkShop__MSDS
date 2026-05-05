@@ -1,6 +1,5 @@
 import streamlit as st
-import time
-import requests
+import httpx
 
 from langchain_ollama import OllamaLLM
 from langchain_community.embeddings import OllamaEmbeddings
@@ -8,7 +7,7 @@ from langchain_community.vectorstores import Chroma
 
 st.set_page_config(page_title="Task 4: RAG Tender Interrogator", page_icon="📚")
 
-st.title("  📚 Task 4: The 1,000-Page Tender Interrogator")
+st.title("📚 Task 4: The 1,000-Page Tender Interrogator")
 
 st.markdown("""
 We are using a real RAG pipeline with ChromaDB + Ollama.
@@ -57,16 +56,18 @@ def run_rag_pipeline(user_query):
         docs = db.similarity_search(user_query, k=3)
 
         # 🧪 DEBUG (VERY IMPORTANT)
-        st.write("🔍 Retrieved Documents Count:", len(docs))
+        if st.query_params.get("debug") == "true":
+            st.write("🔍 Retrieved Documents Count:", len(docs))
 
         if not docs:
-            return "❌ No data retrieved. Check if ChromaDB is loaded correctly."
+            return "❌ No data retrieved. Check if ChromaDB is loaded correctly.", []
 
-        # Show retrieved chunks (for debugging)
-        for i, d in enumerate(docs):
-            st.write(f"--- Chunk {i+1} ---")
-            st.write(d.page_content[:300])  # preview
-            st.write(d.metadata)
+        if st.query_params.get("debug") == "true":
+            # Show retrieved chunks (for debugging)
+            for i, d in enumerate(docs):
+                st.write(f"--- Chunk {i+1} ---")
+                st.write(d.page_content[:300])  # preview
+                st.write(d.metadata)
 
         # 📄 Step 2: Build context
         context = "\n\n".join([d.page_content for d in docs])
@@ -76,8 +77,9 @@ def run_rag_pipeline(user_query):
         for d in docs:
             if "page" in d.metadata:
                 pages.append(str(d.metadata["page"] + 1))
-
-        source_text = ", ".join(set(pages)) if pages else "Unknown"
+        
+        pages = list(set(pages))
+        source_text = ", ".join(pages) if pages else "Unknown"
 
         # 🤖 Step 4: Prompt
         prompt = f"""You are a helpful assistant analyzing a tender document.
@@ -97,12 +99,12 @@ Important: If you provide an answer, you MUST end your response with:
         # 🤖 Step 5: LLM
         response = llm.invoke(prompt)
 
-        return response
+        return response, pages
 
-    except requests.exceptions.ConnectionError:
-        return "❌ Error: Ollama is not running. Please start Ollama before asking a question."
+    except httpx.ConnectError:
+        return "❌ Error: Ollama is not running. Please start Ollama before asking a question.", []
     except Exception as e:
-        return f"❌ Error: {str(e)}"
+        return f"❌ Error: {str(e)}", []
 
 # ==========================================================
 # USER INPUT
@@ -116,15 +118,11 @@ if prompt := st.chat_input("Ask a question about the tender..."):
     with st.chat_message("assistant"):
         with st.spinner("Searching..."):
 
-            response = run_rag_pipeline(prompt)
+            response, pages = run_rag_pipeline(prompt)
             st.markdown(response)
 
             # clickable PDF link
-            if "page" in response:
-                try:
-                    page_num = int(response.split("page ")[1].split()[0])
-                    st.markdown(f"[📄 Open PDF](tender.pdf#page={page_num})")
-                except:
-                    pass
+            for p in pages:
+                st.markdown(f"[📄 Page {p}](tender.pdf#page={p})")
 
     st.session_state.messages.append({"role": "assistant", "content": response})
