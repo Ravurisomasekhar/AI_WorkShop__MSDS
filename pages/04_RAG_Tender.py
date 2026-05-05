@@ -1,66 +1,128 @@
 import streamlit as st
-import time
+import httpx
+
+from langchain_ollama import OllamaLLM
+from langchain_community.embeddings import OllamaEmbeddings
+from langchain_community.vectorstores import Chroma
 
 st.set_page_config(page_title="Task 4: RAG Tender Interrogator", page_icon="📚")
 
 st.title("📚 Task 4: The 1,000-Page Tender Interrogator")
 
 st.markdown("""
-**The Context:** Bidding for PGCIL or international EPC tenders involves digesting hundreds of pages of complex legal and technical constraints.
-We will build a Retrieval-Augmented Generation (RAG) pipeline to ground an LLM in a specific document.
+We are using a real RAG pipeline with ChromaDB + Ollama.
 """)
 
-st.write("### 🗄️ Vector Database Context")
-st.info("For this workshop, we assume a dummy 50-page PDF tender document has already been chunked and loaded into ChromaDB.")
+# ==========================================================
+# LOAD MODELS + DB
+# ==========================================================
 
-# Initialize chat history
+@st.cache_resource
+def load_models():
+    embedding = OllamaEmbeddings(model="nomic-embed-text")
+
+    db = Chroma(
+        persist_directory="./chroma_db",
+        embedding_function=embedding
+    )
+
+    llm = OllamaLLM(model="llama3.2:1b", temperature=0.0)
+
+    return db, llm
+
+db, llm = load_models()
+
+# ==========================================================
+# CHAT HISTORY
+# ==========================================================
+
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "assistant", "content": "I have ingested the 'PGCIL 400kV Substation Tender v2.pdf'. What would you like to know?"}
+        {"role": "assistant", "content": "I have ingested the tender document. Ask me anything."}
     ]
 
-# Display chat history
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-# ==========================================
-# 🛑 PARTICIPANT CODE GOES HERE 🛑
-# ==========================================
+# ==========================================================
+# RAG PIPELINE
+# ==========================================================
+
 def run_rag_pipeline(user_query):
-    """
-    TODO: Implement the RAG logic.
-    1. Embed the user query.
-    2. Search the vector database (ChromaDB) for the top 3 similar chunks.
-    3. Pass the chunks + query to the LLM to generate an answer.
-    4. Ensure it returns a citation!
-    """
-    # --- INSTRUCTOR MODE FLAG ---
-    if st.query_params.get("instructor") == "true":
-        time.sleep(1.5)
-        return "The exact Liquidated Damages (LD) clause is 0.5% of the contract price per week of delay, up to a maximum of 10%. (Source: *pg. 42, Clause 14.2*)"
-    # ---------------------------
-    
-    # --- WRITE YOUR RAG PIPELINE HERE ---
-    # e.g., docs = vector_db.similarity_search(query)
-    #       response = llm(prompt=f"Context: {docs} Query: {query}")
-    return "⚠️ RAG pipeline code not implemented yet. Please write your code."
-    # ------------------------------------
 
-# ==========================================
+    try:
+        # 🔍 Step 1: Retrieve docs
+        docs = db.similarity_search(user_query, k=3)
 
-# React to user input
+        # 🧪 DEBUG (VERY IMPORTANT)
+        if st.query_params.get("debug") == "true":
+            st.write("🔍 Retrieved Documents Count:", len(docs))
+
+        if not docs:
+            return "❌ No data retrieved. Check if ChromaDB is loaded correctly.", []
+
+        if st.query_params.get("debug") == "true":
+            # Show retrieved chunks (for debugging)
+            for i, d in enumerate(docs):
+                st.write(f"--- Chunk {i+1} ---")
+                st.write(d.page_content[:300])  # preview
+                st.write(d.metadata)
+
+        # 📄 Step 2: Build context
+        context = "\n\n".join([d.page_content for d in docs])
+
+        # 📌 Step 3: Extract pages
+        pages = []
+        for d in docs:
+            if "page" in d.metadata:
+                pages.append(str(d.metadata["page"] + 1))
+        
+        pages = list(set(pages))
+        source_text = ", ".join(pages) if pages else "Unknown"
+
+        # 🤖 Step 4: Prompt
+        prompt = f"""You are a helpful assistant analyzing a tender document.
+Answer the user's question using ONLY the provided context. 
+If the context contains relevant information, summarize it.
+If the context does not contain any relevant information, reply EXACTLY with: "❌ Data not present in document. Cannot answer."
+
+Context:
+{context}
+
+Question: {user_query}
+
+Important: If you provide an answer, you MUST end your response with:
+(Source: page {source_text})
+"""
+
+        # 🤖 Step 5: LLM
+        response = llm.invoke(prompt)
+
+        return response, pages
+
+    except httpx.ConnectError:
+        return "❌ Error: Ollama is not running. Please start Ollama before asking a question.", []
+    except Exception as e:
+        return f"❌ Error: {str(e)}", []
+
+# ==========================================================
+# USER INPUT
+# ==========================================================
+
 if prompt := st.chat_input("Ask a question about the tender..."):
-    # Display user message
+
     st.chat_message("user").markdown(prompt)
     st.session_state.messages.append({"role": "user", "content": prompt})
 
-    # Display assistant response
     with st.chat_message("assistant"):
-        with st.spinner("Searching document vectors..."):
-            response = run_rag_pipeline(prompt)
+        with st.spinner("Searching..."):
+
+            response, pages = run_rag_pipeline(prompt)
             st.markdown(response)
-            
-            st.success("💡 **HCI Challenge:** Notice the 'Source' citation. Can you make that a clickable link to open the PDF to the exact page?")
-            
+
+            # clickable PDF link
+            for p in pages:
+                st.markdown(f"[📄 Page {p}](tender.pdf#page={p})")
+
     st.session_state.messages.append({"role": "assistant", "content": response})

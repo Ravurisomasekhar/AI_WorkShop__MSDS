@@ -9,3 +9,9 @@ yolov8==0.0.1
 
 requests==2.31.0
 Pillow==10.2.0
+
+# Task 4
+langchain-community
+langchain-text-splitters
+pypdf
+langchain-ollama
