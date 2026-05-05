@@ -1,7 +1,7 @@
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import OllamaEmbeddings
+from langchain_ollama import OllamaEmbeddings
 
 # Load PDF
 loader = PyPDFLoader("tender.pdf")
@@ -15,7 +15,7 @@ splitter = RecursiveCharacterTextSplitter(
 chunks = splitter.split_documents(docs)
 
 # Embeddings
-embedding = OllamaEmbeddings(model="llama3")
+embedding = OllamaEmbeddings(model="nomic-embed-text")
 
 # Store in DB
 db = Chroma.from_documents(
@@ -24,6 +24,4 @@ db = Chroma.from_documents(
     persist_directory="./chroma_db"
 )
 
-db.persist()
-
-print("✅ Vector DB created successfully!")
+print("Vector DB created successfully!")

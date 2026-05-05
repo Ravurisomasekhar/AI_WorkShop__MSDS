@@ -1,28 +1,37 @@
 import streamlit as st
 import time
-from langchain_community.llms import Ollama
+import requests
+
+from langchain_ollama import OllamaLLM
+from langchain_community.embeddings import OllamaEmbeddings
+from langchain_community.vectorstores import Chroma
 
 st.set_page_config(page_title="Task 4: RAG Tender Interrogator", page_icon="📚")
 
-st.title("📚 Task 4: The 1,000-Page Tender Interrogator")
+st.title("  📚 Task 4: The 1,000-Page Tender Interrogator")
 
 st.markdown("""
-**The Context:** Bidding for PGCIL or international EPC tenders involves digesting hundreds of pages of complex legal and technical constraints.
-We will build a Retrieval-Augmented Generation (RAG) pipeline to ground an LLM in a specific document.
+We are using a real RAG pipeline with ChromaDB + Ollama.
 """)
 
-st.write("### 🗄️ Vector Database Context")
-st.info("For this demo, we are using a sample tender section as our data.")
-
 # ==========================================================
-# ✅ LOAD LLM
+# LOAD MODELS + DB
 # ==========================================================
 
 @st.cache_resource
-def load_llm():
-    return Ollama(model="phi3")
+def load_models():
+    embedding = OllamaEmbeddings(model="nomic-embed-text")
 
-llm = load_llm()
+    db = Chroma(
+        persist_directory="./chroma_db",
+        embedding_function=embedding
+    )
+
+    llm = OllamaLLM(model="llama3.2:1b", temperature=0.0)
+
+    return db, llm
+
+db, llm = load_models()
 
 # ==========================================================
 # CHAT HISTORY
@@ -30,67 +39,68 @@ llm = load_llm()
 
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "assistant", "content": "I have ingested the tender data. What would you like to know?"}
+        {"role": "assistant", "content": "I have ingested the tender document. Ask me anything."}
     ]
 
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
 # ==========================================================
-# RAG FUNCTION (MINI VERSION)
+# RAG PIPELINE
 # ==========================================================
 
 def run_rag_pipeline(user_query):
 
-    # Demo mode
-    if st.query_params.get("instructor") == "true":
-        time.sleep(1.5)
-        return "Demo answer"
-
     try:
-        # ✅ YOUR TENDER DATA
-        context = """
-23. Bid Opening 
+        # 🔍 Step 1: Retrieve docs
+        docs = db.similarity_search(user_query, k=3)
 
-23.1 The Superintending Engineer GMDA will open all the Bids received (except those received late), 
-in the presence of the bidders.
+        # 🧪 DEBUG (VERY IMPORTANT)
+        st.write("🔍 Retrieved Documents Count:", len(docs))
 
-23.3 The Technical Bid shall be opened first.
+        if not docs:
+            return "❌ No data retrieved. Check if ChromaDB is loaded correctly."
 
-23.4 Earnest money, forms, and validity shall be announced.
+        # Show retrieved chunks (for debugging)
+        for i, d in enumerate(docs):
+            st.write(f"--- Chunk {i+1} ---")
+            st.write(d.page_content[:300])  # preview
+            st.write(d.metadata)
 
-23.5 Technical bids will be evaluated and responsive bidders identified.
+        # 📄 Step 2: Build context
+        context = "\n\n".join([d.page_content for d in docs])
 
-23.6 Financial bid opening date and time will be announced.
+        # 📌 Step 3: Extract pages
+        pages = []
+        for d in docs:
+            if "page" in d.metadata:
+                pages.append(str(d.metadata["page"] + 1))
 
-23.7 Financial bids of only responsive bidders will be opened and prices announced.
+        source_text = ", ".join(set(pages)) if pages else "Unknown"
 
-23.8 The Superintending Engineer will prepare minutes of the bid opening.
-"""
-
-        # ✅ Strong Prompt
-        prompt = f"""
-You are a tender document assistant.
-
-Rules:
-1. Answer ONLY from the context below.
-2. Do NOT guess or use outside knowledge.
-3. If answer is NOT present, reply EXACTLY:
-   "❌ Data not present in document. Cannot answer."
+        # 🤖 Step 4: Prompt
+        prompt = f"""You are a helpful assistant analyzing a tender document.
+Answer the user's question using ONLY the provided context. 
+If the context contains relevant information, summarize it.
+If the context does not contain any relevant information, reply EXACTLY with: "❌ Data not present in document. Cannot answer."
 
 Context:
 {context}
 
-Question:
-{user_query}
+Question: {user_query}
 
-Also include source clause number if possible.
+Important: If you provide an answer, you MUST end your response with:
+(Source: page {source_text})
 """
 
+        # 🤖 Step 5: LLM
         response = llm.invoke(prompt)
+
         return response
 
+    except requests.exceptions.ConnectionError:
+        return "❌ Error: Ollama is not running. Please start Ollama before asking a question."
     except Exception as e:
         return f"❌ Error: {str(e)}"
 
@@ -99,20 +109,22 @@ Also include source clause number if possible.
 # ==========================================================
 
 if prompt := st.chat_input("Ask a question about the tender..."):
-    
+
     st.chat_message("user").markdown(prompt)
     st.session_state.messages.append({"role": "user", "content": prompt})
 
     with st.chat_message("assistant"):
-        with st.spinner("Analyzing document..."):
-            
+        with st.spinner("Searching..."):
+
             response = run_rag_pipeline(prompt)
             st.markdown(response)
 
-            # ✅ HCI clickable example (static)
-            st.markdown("[📄 Open Tender PDF (Sample)](PGCIL.pdf#page=1)")
+            # clickable PDF link
+            if "page" in response:
+                try:
+                    page_num = int(response.split("page ")[1].split()[0])
+                    st.markdown(f"[📄 Open PDF](tender.pdf#page={page_num})")
+                except:
+                    pass
 
     st.session_state.messages.append({"role": "assistant", "content": response})
-
-
-    # 
